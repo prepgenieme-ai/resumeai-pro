@@ -41,9 +41,41 @@ export default function OptimizePage() {
 
   const handleFileUpload = async (file) => {
     if (!file) return
-    const text = await file.text()
-    setResumeText(text)
-    toast.success('Resume uploaded! ✅')
+
+    const fileName = file.name.toLowerCase()
+    const isPdf = fileName.endsWith('.pdf')
+    const isDocx = fileName.endsWith('.docx')
+    const isTxt = fileName.endsWith('.txt')
+
+    if (isPdf || isDocx) {
+      // Use server-side parser for PDF and DOCX
+      toast.loading('Reading your resume...', { id: 'upload' })
+      try {
+        const formData = new FormData()
+        formData.append('resume', file)
+
+        const response = await fetch('/api/parse-resume', {
+          method: 'POST',
+          body: formData,
+        })
+        const data = await response.json()
+
+        if (data.error) {
+          toast.error(data.error, { id: 'upload' })
+          return
+        }
+
+        setResumeText(data.text)
+        toast.success(`Resume read! ${data.wordCount} words detected ✅`, { id: 'upload' })
+      } catch (err) {
+        toast.error('Failed to read file. Please paste your resume text instead.', { id: 'upload' })
+      }
+    } else {
+      // Plain text fallback
+      const text = await file.text()
+      setResumeText(text)
+      toast.success('Resume uploaded! ✅')
+    }
   }
 
   const handleDrop = (e) => {
