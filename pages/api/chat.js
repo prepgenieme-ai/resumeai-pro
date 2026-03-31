@@ -4,68 +4,55 @@ export default async function handler(req, res) {
   }
 
   const { message, currentResume, jobRole } = req.body
+  const GROQ_API_KEY = process.env.GROQ_API_KEY
 
-  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
-
-  if (!ANTHROPIC_API_KEY) {
+  if (!GROQ_API_KEY) {
     return res.status(500).json({ error: 'API key not configured' })
   }
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 3000,
-        system: `You are an expert resume writer and career coach. The user has already had their resume optimised for a ${jobRole} role. They want to make further tweaks through natural conversation.
+    const prompt = `You are an expert resume writer. The user has an optimised resume for a ${jobRole} role and wants to tweak it.
 
-When they ask for changes:
-1. Update the resume accordingly
-2. Reply in a friendly, encouraging tone
-3. Explain briefly what you changed and why
+Current resume:
+${currentResume}
 
-Always respond in this JSON format (no markdown, no backticks):
+User request: ${message}
+
+Update the resume based on their request and reply in a friendly tone explaining what you changed.
+
+Respond in this EXACT JSON format only (no markdown, no backticks):
 {
   "reply": "Your friendly message explaining what you changed",
   "updatedResume": "THE FULL UPDATED RESUME TEXT"
-}
+}`
 
-If the user asks a question without wanting a change, still respond in JSON but keep updatedResume the same as the current one.`,
-        messages: [
-          {
-            role: 'user',
-            content: `Current resume:\n\n${currentResume}\n\nUser request: ${message}`
-          }
-        ]
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.7,
+        max_tokens: 3000
       })
     })
 
     const data = await response.json()
-
-    if (data.error) {
-      return res.status(500).json({ error: data.error.message })
-    }
-
-    const content = data.content[0].text
+    const content = data.choices?.[0]?.message?.content || ''
 
     let parsed
     try {
       const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
       parsed = JSON.parse(cleaned)
     } catch {
-      return res.json({
-        reply: content,
-        updatedResume: currentResume
-      })
+      return res.json({ reply: content, updatedResume: currentResume })
     }
 
     return res.json({
-      reply: parsed.reply || 'Done! I\'ve updated your resume.',
+      reply: parsed.reply || 'Done! Resume updated.',
       updatedResume: parsed.updatedResume || currentResume
     })
 
