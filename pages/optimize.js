@@ -45,19 +45,33 @@ export default function OptimizePage() {
     const fileName = file.name.toLowerCase()
     const isPdf = fileName.endsWith('.pdf')
     const isDocx = fileName.endsWith('.docx')
-    const isTxt = fileName.endsWith('.txt')
 
     if (isPdf || isDocx) {
-      // Use server-side parser for PDF and DOCX
       toast.loading('Reading your resume...', { id: 'upload' })
       try {
-        const formData = new FormData()
-        formData.append('resume', file)
+        // Read file as base64
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => {
+            const result = reader.result
+            // Remove the data:...;base64, prefix
+            const base64Data = result.split(',')[1]
+            resolve(base64Data)
+          }
+          reader.onerror = reject
+          reader.readAsDataURL(file)
+        })
 
         const response = await fetch('/api/parse-resume', {
           method: 'POST',
-          body: formData,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileData: base64,
+            fileName: file.name,
+            fileType: file.type,
+          }),
         })
+
         const data = await response.json()
 
         if (data.error) {
@@ -71,7 +85,6 @@ export default function OptimizePage() {
         toast.error('Failed to read file. Please paste your resume text instead.', { id: 'upload' })
       }
     } else {
-      // Plain text fallback
       const text = await file.text()
       setResumeText(text)
       toast.success('Resume uploaded! ✅')
@@ -132,29 +145,52 @@ export default function OptimizePage() {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userMsg,
-          currentResume: optimisedResume,
-          jobRole
-        })
+        body: JSON.stringify({ message: userMsg, currentResume: optimisedResume, jobRole })
       })
       const data = await response.json()
-      if (data.updatedResume) setOptimisedResume(data.updatedResume)
-      setChatMessages(prev => [...prev, { role: 'ai', text: data.reply }])
+      if (data.updatedResume && data.updatedResume.trim().length > 50) {
+        setOptimisedResume(data.updatedResume)
+        setActiveTab('resume')
+      }
+      let cleanReply = data.reply || 'Done! Your resume has been updated.'
+      if (cleanReply.includes('"reply"') || cleanReply.startsWith('{')) {
+        cleanReply = 'Done! I updated your resume as requested. Check the preview on the left! ✅'
+      }
+      setChatMessages(prev => [...prev, { role: 'ai', text: cleanReply }])
     } catch {
       setChatMessages(prev => [...prev, { role: 'ai', text: 'Sorry, something went wrong. Please try again.' }])
     }
     setChatLoading(false)
   }
 
-  const downloadResume = () => {
+  const downloadAsTxt = () => {
     const blob = new Blob([optimisedResume], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `optimised-resume-${jobRole.replace(/\s+/g, '-')}.txt`
+    a.download = `resume-${jobRole.replace(/\s+/g, '-')}.txt`
     a.click()
-    toast.success('Resume downloaded! 🎉')
+    URL.revokeObjectURL(url)
+    toast.success('Downloaded as TXT!')
+  }
+
+  const downloadAsWord = () => {
+    const wordContent = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Resume</title><style>body{font-family:Calibri,sans-serif;font-size:11pt;margin:1in;}p{margin:4pt 0;}</style></head><body>${optimisedResume.split('\n').map(line => `<p>${line || '&nbsp;'}</p>`).join('')}</body></html>`
+    const blob = new Blob([wordContent], { type: 'application/msword' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `resume-${jobRole.replace(/\s+/g, '-')}.doc`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success('Downloaded as Word! 📝')
+  }
+
+  const downloadAsPdf = () => {
+    const printWindow = window.open('', '_blank')
+    printWindow.document.write(`<html><head><title>Resume</title><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;margin:0.8in;line-height:1.5;}pre{white-space:pre-wrap;font-family:Calibri,Arial,sans-serif;font-size:11pt;}</style></head><body><pre>${optimisedResume}</pre><script>window.onload=function(){window.print();setTimeout(()=>window.close(),1000)}<\/script></body></html>`)
+    printWindow.document.close()
+    toast.success('Opening PDF export... 🖨️')
   }
 
   return (
@@ -332,12 +368,15 @@ export default function OptimizePage() {
                     {tab === 'resume' ? '📄 Resume' : tab === 'cover' ? '✉️ Cover Letter' : '💼 LinkedIn'}
                   </button>
                 ))}
-                <div className="ml-auto py-2">
-                  <button
-                    onClick={downloadResume}
-                    className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-lg text-xs font-semibold hover:bg-orange-500 transition-colors"
-                  >
-                    ⬇ Download
+                <div className="ml-auto py-2 flex gap-2">
+                  <button onClick={downloadAsPdf} className="px-3 py-1.5 bg-[var(--ink)] text-white rounded-lg text-xs font-semibold hover:bg-[var(--accent)] transition-colors">
+                    📄 PDF
+                  </button>
+                  <button onClick={downloadAsWord} className="px-3 py-1.5 bg-[var(--ink)] text-white rounded-lg text-xs font-semibold hover:bg-[var(--accent)] transition-colors">
+                    📝 Word
+                  </button>
+                  <button onClick={downloadAsTxt} className="px-3 py-1.5 bg-[var(--accent)] text-white rounded-lg text-xs font-semibold hover:bg-orange-500 transition-colors">
+                    ⬇ TXT
                   </button>
                 </div>
               </div>

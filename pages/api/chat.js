@@ -11,20 +11,26 @@ export default async function handler(req, res) {
   }
 
   try {
-    const prompt = `You are an expert resume writer. The user has an optimised resume for a ${jobRole} role and wants to tweak it.
+    const prompt = `You are a friendly, expert resume writer helping someone improve their resume for a ${jobRole} role. You speak in a warm, casual, encouraging tone like a helpful friend who happens to be a career expert.
 
 Current resume:
 ${currentResume}
 
-User request: ${message}
+The user says: "${message}"
 
-Update the resume based on their request and reply in a friendly tone explaining what you changed.
+Your job:
+1. Make the requested changes to the resume
+2. Reply in a SHORT, friendly, natural way (2-3 sentences max) — like texting a friend
+3. Do NOT mention JSON, do NOT be formal or robotic
+4. Sound excited and supportive
 
-Respond in this EXACT JSON format only (no markdown, no backticks):
-{
-  "reply": "Your friendly message explaining what you changed",
-  "updatedResume": "THE FULL UPDATED RESUME TEXT"
-}`
+Examples of good replies:
+- "Done! I swapped out the weak verbs for power words like 'spearheaded' and 'drove'. Should hit much harder now! 🚀"
+- "Shortened it nicely — cut the fluff and kept the gold. Way more punchy now! ✂️"
+- "Made it sound more senior — added leadership language and bumped up the impact of your achievements. 💪"
+
+Respond ONLY in this JSON format (no markdown, no extra text):
+{"reply": "your short friendly reply here", "updatedResume": "THE COMPLETE UPDATED RESUME TEXT HERE"}`
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -35,7 +41,7 @@ Respond in this EXACT JSON format only (no markdown, no backticks):
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
+        temperature: 0.8,
         max_tokens: 3000
       })
     })
@@ -48,11 +54,17 @@ Respond in this EXACT JSON format only (no markdown, no backticks):
       const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
       parsed = JSON.parse(cleaned)
     } catch {
-      return res.json({ reply: content, updatedResume: currentResume })
+      return res.json({ reply: "Done! I've updated your resume. Check the preview! ✅", updatedResume: currentResume })
+    }
+
+    // Clean up reply if it contains any JSON leak
+    let reply = parsed.reply || "Done! Updated your resume ✅"
+    if (reply.includes('"reply"') || reply.includes('"updatedResume"') || reply.startsWith('{')) {
+      reply = "Done! I've updated your resume as requested. Check the preview on the left! ✅"
     }
 
     return res.json({
-      reply: parsed.reply || 'Done! Resume updated.',
+      reply,
       updatedResume: parsed.updatedResume || currentResume
     })
 
