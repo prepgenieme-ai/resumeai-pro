@@ -1,9 +1,8 @@
-import formidable from 'formidable'
-import fs from 'fs'
-
 export const config = {
   api: {
-    bodyParser: false,
+    bodyParser: {
+      sizeLimit: '10mb',
+    },
   },
 }
 
@@ -13,61 +12,64 @@ export default async function handler(req, res) {
   }
 
   try {
-    const form = formidable({ maxFileSize: 10 * 1024 * 1024 }) // 10MB max
+    const { fileData, fileName, fileType } = req.body
 
-    const [fields, files] = await new Promise((resolve, reject) => {
-      form.parse(req, (err, fields, files) => {
-        if (err) reject(err)
-        else resolve([fields, files])
-      })
-    })
-
-    const file = files.resume?.[0] || files.resume
-    if (!file) {
-      return res.status(400).json({ error: 'No file uploaded' })
+    if (!fileData) {
+      return res.status(400).json({ error: 'No file data received' })
     }
 
-    const fileBuffer = fs.readFileSync(file.filepath)
-    const mimeType = file.mimetype || ''
-    const fileName = file.originalFilename || ''
-
+    const buffer = Buffer.from(fileData, 'base64')
     let extractedText = ''
 
-    if (mimeType === 'application/pdf' || fileName.endsWith('.pdf')) {
-      // Parse PDF
-      const pdfParse = (await import('pdf-parse/lib/pdf-parse.js')).default
-      const data = await pdfParse(fileBuffer)
-      extractedText = data.text
-    } else if (
-      mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-      fileName.endsWith('.docx')
-    ) {
-      // Parse DOCX using mammoth
-      const mammoth = await import('mammoth')
-      const result = await mammoth.extractRawText({ buffer: fileBuffer })
-      extractedText = result.value
-    } else if (mimeType === 'text/plain' || fileName.endsWith('.txt')) {
-      extractedText = fileBuffer.toString('utf-8')
+    const lowerName = (fileName || '').toLowerCase()
+    const isPdf = lowerName.endsWith('.pdf') || fileType === 'application/pdf'
+    const isDocx = lowerName.endsWith('.docx') || fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
+    if (isPdf) {
+      try {
+        const pdfParse = (await import('pdf-parse/lib/pdf-parse.js')).default
+        const data = await pdfParse(buffer)
+        extractedText = data.text
+      } catch (pdfError) {
+        console.error('PDF parse error:', pdfError)
+        return res.status(400).json({
+          error: 'Could not read this PDF. Please paste your resume text directly in the text box below.'
+        })
+      }
+    } else if (isDocx) {
+      try {
+        const mammoth = await import('mammoth')
+        const result = await mammoth.extractRawText({ buffer })
+        extractedText = result.value
+      } catch (docxError) {
+        console.error('DOCX parse error:', docxError)
+        return res.status(400).json({
+          error: 'Could not read this Word file. Please paste your resume text directly.'
+        })
+      }
     } else {
-      // Try as plain text fallback
-      extractedText = fileBuffer.toString('utf-8')
+      extractedText = buffer.toString('utf-8')
     }
 
-    // Clean up the extracted text
     extractedText = extractedText
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
       .replace(/\n{3,}/g, '\n\n')
       .trim()
 
-    if (!extractedText || extractedText.length < 50) {
-      return res.status(400).json({ error: 'Could not extract text from file. Please paste your resume text instead.' })
+    if (!extractedText || extractedText.length < 30) {
+      return res.status(400).json({
+        error: 'Resume appears empty or unreadable. Please paste your resume text directly.'
+      })
     }
 
-    return res.json({ text: extractedText, wordCount: extractedText.split(/\s+/).length })
+    const wordCount = extractedText.split(/\s+/).filter(Boolean).length
+    return res.json({ text: extractedText, wordCount })
 
   } catch (error) {
     console.error('Parse error:', error)
-    return res.status(500).json({ error: 'Failed to parse resume. Please paste your resume text directly.' })
+    return res.status(500).json({
+      error: 'Failed to parse file. Please paste your resume text directly in the text box.'
+    })
   }
 }
