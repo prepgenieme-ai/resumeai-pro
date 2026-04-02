@@ -19,7 +19,8 @@ const loadingMessages = [
 export default function OptimizePage() {
   const router = useRouter()
   const { plan, payment_id } = router.query
-  const isPremium = plan === 'premium'
+  const isPremium = plan === 'premium' && !!payment_id
+  const isPaid = !!payment_id
 
   const [step, setStep] = useState('upload')
   const [resumeText, setResumeText] = useState('')
