@@ -4,67 +4,68 @@ export default async function handler(req, res) {
   }
 
   const { message, currentResume, jobRole } = req.body
-  const GROQ_API_KEY = process.env.GROQ_API_KEY
 
-  if (!GROQ_API_KEY) {
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY
+
+  if (!ANTHROPIC_API_KEY) {
     return res.status(500).json({ error: 'API key not configured' })
   }
 
   try {
-    const prompt = `You are a friendly, expert resume writer helping someone improve their resume for a ${jobRole} role. You speak in a warm, casual, encouraging tone like a helpful friend who happens to be a career expert.
-
-Current resume:
-${currentResume}
-
-The user says: "${message}"
-
-Your job:
-1. Make the requested changes to the resume
-2. Reply in a SHORT, friendly, natural way (2-3 sentences max) — like texting a friend
-3. Do NOT mention JSON, do NOT be formal or robotic
-4. Sound excited and supportive
-
-Examples of good replies:
-- "Done! I swapped out the weak verbs for power words like 'spearheaded' and 'drove'. Should hit much harder now! 🚀"
-- "Shortened it nicely — cut the fluff and kept the gold. Way more punchy now! ✂️"
-- "Made it sound more senior — added leadership language and bumped up the impact of your achievements. 💪"
-
-Respond ONLY in this JSON format (no markdown, no extra text):
-{"reply": "your short friendly reply here", "updatedResume": "THE COMPLETE UPDATED RESUME TEXT HERE"}`
-
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROQ_API_KEY}`
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.8,
-        max_tokens: 3000
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 3000,
+        system: `You are an expert resume writer and career coach. The user has already had their resume optimised for a ${jobRole} role. They want to make further tweaks through natural conversation.
+
+When they ask for changes:
+1. Update the resume accordingly
+2. Reply in a friendly, encouraging tone
+3. Explain briefly what you changed and why
+
+Always respond in this JSON format (no markdown, no backticks):
+{
+  "reply": "Your friendly message explaining what you changed",
+  "updatedResume": "THE FULL UPDATED RESUME TEXT"
+}
+
+If the user asks a question without wanting a change, still respond in JSON but keep updatedResume the same as the current one.`,
+        messages: [
+          {
+            role: 'user',
+            content: `Current resume:\n\n${currentResume}\n\nUser request: ${message}`
+          }
+        ]
       })
     })
 
     const data = await response.json()
-    const content = data.choices?.[0]?.message?.content || ''
+
+    if (data.error) {
+      return res.status(500).json({ error: data.error.message })
+    }
+
+    const content = data.content[0].text
 
     let parsed
     try {
       const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
       parsed = JSON.parse(cleaned)
     } catch {
-      return res.json({ reply: "Done! I've updated your resume. Check the preview! ✅", updatedResume: currentResume })
-    }
-
-    // Clean up reply if it contains any JSON leak
-    let reply = parsed.reply || "Done! Updated your resume ✅"
-    if (reply.includes('"reply"') || reply.includes('"updatedResume"') || reply.startsWith('{')) {
-      reply = "Done! I've updated your resume as requested. Check the preview on the left! ✅"
+      return res.json({
+        reply: content,
+        updatedResume: currentResume
+      })
     }
 
     return res.json({
-      reply,
+      reply: parsed.reply || 'Done! I\'ve updated your resume.',
       updatedResume: parsed.updatedResume || currentResume
     })
 

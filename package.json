@@ -15,9 +15,8 @@
     "framer-motion": "^11.0.0",
     "react-dropzone": "^14.2.3",
     "react-hot-toast": "^2.4.1",
-    "pdf-parse": "^1.1.1",
-    "mammoth": "^1.7.2",
-    "formidable": "^3.5.1"
+    "pdfjs-dist": "^4.3.136",
+    "mammoth": "^1.7.2"
   },
   "devDependencies": {
     "autoprefixer": "^10.0.1",
